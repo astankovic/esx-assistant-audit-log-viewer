@@ -1198,10 +1198,16 @@ function buildConversationData() {
             });
         }
         else if (event.eventType === 'tool_result') {
+            const content = event.data?.content || event.data?.result;
+            // Check if it's an error: explicit isError flag, or content starts with "Error"
+            const contentStr = typeof content === 'string' ? content : (Array.isArray(content) ? extractTextContent(content) : '');
+            const isError = event.data?.isError || contentStr.startsWith('Error');
+
             conversationLines.push({
                 type: 'tool-result',
                 toolCallId: event.data?.tool_call_id,
-                content: event.data?.content || event.data?.result
+                content: content,
+                isError: isError
             });
         }
     });
@@ -1226,19 +1232,38 @@ function createConversationLine(line) {
     lineDiv.className = `conversation-line ${line.type}`;
 
     if (line.type === 'user') {
-        // Simple user message
+        // User message with "User:" prefix on the left
+        const roleLabel = document.createElement('div');
+        roleLabel.className = 'role-label';
+        roleLabel.textContent = 'User:';
+        lineDiv.appendChild(roleLabel);
+
         const textDiv = document.createElement('div');
         textDiv.className = 'message-text';
         textDiv.textContent = line.content;
         lineDiv.appendChild(textDiv);
     } else if (line.type === 'assistant') {
-        // Simple assistant message
+        // Assistant message with "Assistant:" prefix on the left
+        const roleLabel = document.createElement('div');
+        roleLabel.className = 'role-label';
+        roleLabel.textContent = 'Assistant:';
+        lineDiv.appendChild(roleLabel);
+
         const textDiv = document.createElement('div');
         textDiv.className = 'message-text';
         textDiv.textContent = line.content;
         lineDiv.appendChild(textDiv);
     } else if (line.type === 'tool-call') {
-        // Collapsible tool call
+        // Tool call with "Tool Call:" role label on the left
+        const roleLabel = document.createElement('div');
+        roleLabel.className = 'role-label';
+        roleLabel.textContent = 'Tool Call:';
+        lineDiv.appendChild(roleLabel);
+
+        // Container for the collapsible tool call box
+        const boxContainer = document.createElement('div');
+        boxContainer.className = 'tool-call-box';
+
         const header = document.createElement('div');
         header.className = 'line-header';
 
@@ -1247,12 +1272,7 @@ function createConversationLine(line) {
         expandIcon.textContent = '▶';
         header.appendChild(expandIcon);
 
-        const label = document.createElement('span');
-        label.className = 'line-label';
-        label.textContent = 'Tool Call';
-        header.appendChild(label);
-
-        // Tool badge
+        // Tool badge with tool name
         const toolName = line.toolCall.toolName || line.toolCall.name || 'unknown';
         const badge = document.createElement('span');
         badge.className = 'tool-badge';
@@ -1260,7 +1280,7 @@ function createConversationLine(line) {
         badge.textContent = toolName;
         header.appendChild(badge);
 
-        lineDiv.appendChild(header);
+        boxContainer.appendChild(header);
 
         // Tool content (collapsed by default)
         const content = document.createElement('div');
@@ -1277,14 +1297,24 @@ function createConversationLine(line) {
             content.textContent = line.toolCall.input || line.toolCall.arguments || 'No arguments';
         }
 
-        lineDiv.appendChild(content);
+        boxContainer.appendChild(content);
+        lineDiv.appendChild(boxContainer);
 
         // Click to expand/collapse
         header.addEventListener('click', () => {
             lineDiv.classList.toggle('expanded');
         });
     } else if (line.type === 'tool-result') {
-        // Collapsible tool result
+        // Tool result with "Tool Result:" role label on the left
+        const roleLabel = document.createElement('div');
+        roleLabel.className = 'role-label';
+        roleLabel.textContent = 'Tool Result:';
+        lineDiv.appendChild(roleLabel);
+
+        // Container for the collapsible tool result box
+        const boxContainer = document.createElement('div');
+        boxContainer.className = 'tool-result-box';
+
         const header = document.createElement('div');
         header.className = 'line-header';
 
@@ -1293,12 +1323,13 @@ function createConversationLine(line) {
         expandIcon.textContent = '▶';
         header.appendChild(expandIcon);
 
-        const label = document.createElement('span');
-        label.className = 'line-label';
-        label.textContent = 'Tool Result';
-        header.appendChild(label);
+        // Add success/failure indicator
+        const statusBadge = document.createElement('span');
+        statusBadge.className = `result-status-badge ${line.isError ? 'failure' : 'success'}`;
+        statusBadge.textContent = line.isError ? '✗ Failed' : '✓ Success';
+        header.appendChild(statusBadge);
 
-        lineDiv.appendChild(header);
+        boxContainer.appendChild(header);
 
         // Tool result content (collapsed by default)
         const content = document.createElement('div');
@@ -1319,7 +1350,8 @@ function createConversationLine(line) {
         }
 
         content.textContent = resultText || 'No result';
-        lineDiv.appendChild(content);
+        boxContainer.appendChild(content);
+        lineDiv.appendChild(boxContainer);
 
         // Click to expand/collapse
         header.addEventListener('click', () => {
