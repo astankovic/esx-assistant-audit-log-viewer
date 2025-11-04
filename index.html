@@ -89,11 +89,27 @@
 
         <div class="center-content">
             <div id="errorMessage" class="error-message" style="display: none;"></div>
-            <div class="events-header">
-                <h2>Event Timeline</h2>
-                <span class="events-count" id="eventsCount">0 events</span>
+
+            <div class="view-tabs">
+                <button class="view-tab active" id="timelineTab" data-view="timeline">Event Timeline</button>
+                <button class="view-tab" id="conversationTab" data-view="conversation">Conversation</button>
             </div>
-            <div class="events-list" id="eventsList"></div>
+
+            <div id="timelineView">
+                <div class="events-header">
+                    <h2>Event Timeline</h2>
+                    <span class="events-count" id="eventsCount">0 events</span>
+                </div>
+                <div class="events-list" id="eventsList"></div>
+            </div>
+
+            <div id="conversationView" style="display: none;">
+                <div class="events-header">
+                    <h2>Conversation</h2>
+                    <span class="events-count" id="conversationCount">0 lines</span>
+                </div>
+                <div class="conversation-list" id="conversationList"></div>
+            </div>
         </div>
 
         <div class="right-sidebar" id="rightSidebar">

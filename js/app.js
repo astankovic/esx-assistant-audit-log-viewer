@@ -16,6 +16,7 @@ const state = {
     sessions: {},
     currentSession: null,
     currentFile: null,
+    currentView: 'timeline', // 'timeline' or 'conversation'
     filters: {
         eventTypes: {
             api_call_request: true, // API request events
@@ -172,6 +173,10 @@ function setupEventListeners() {
     // Sidebar collapse functionality
     document.getElementById('leftToggle').addEventListener('click', toggleLeftSidebar);
     document.getElementById('rightToggle').addEventListener('click', toggleRightSidebar);
+
+    // View tabs
+    document.getElementById('timelineTab').addEventListener('click', () => switchView('timeline'));
+    document.getElementById('conversationTab').addEventListener('click', () => switchView('conversation'));
 
     // Restore sidebar state from localStorage
     restoreSidebarState();
@@ -375,6 +380,7 @@ function renderVisualization() {
     renderInsights(session);
     renderCharts(session);
     renderEventTimeline(session);
+    renderConversationView(session);
 }
 
 function getTokensByDirection(session) {
@@ -849,16 +855,54 @@ function createGroupElement(group) {
 
     const typeBadge = document.createElement('span');
     typeBadge.className = `type-badge ${group.type}`;
-    typeBadge.textContent = group.type.replace('_', ' ');
+    // Custom text for API call types
+    if (group.type === 'api_call_request') {
+        typeBadge.textContent = 'API Request';
+    } else if (group.type === 'api_call_response') {
+        typeBadge.textContent = 'API Response';
+    } else {
+        typeBadge.textContent = group.type.replace('_', ' ');
+    }
 
     const title = document.createElement('span');
     title.className = 'group-title';
     title.textContent = getGroupTitle(group);
 
+    // Get event reference early for tool badges and tokens
+    const event = group.event;
+
+    // For API Response, show tool name badges
+    if (group.type === 'api_call_response') {
+        const toolCalls = event.data?.toolCalls || [];
+        if (toolCalls.length > 0) {
+            // Create "tools:" label
+            const toolsLabel = document.createElement('span');
+            toolsLabel.className = 'tools-label';
+            toolsLabel.textContent = 'tools: ';
+            title.appendChild(toolsLabel);
+
+            // Create badge for each tool
+            toolCalls.forEach((toolCall, index) => {
+                const toolName = toolCall.function?.name || toolCall.name || 'unknown';
+                const toolBadge = document.createElement('span');
+                toolBadge.className = 'tool-name-badge';
+                toolBadge.setAttribute('data-tool', toolName);
+                toolBadge.textContent = toolName;
+                title.appendChild(toolBadge);
+
+                // Add comma separator between tools (not after last one)
+                if (index < toolCalls.length - 1) {
+                    const separator = document.createElement('span');
+                    separator.textContent = ', ';
+                    title.appendChild(separator);
+                }
+            });
+        }
+    }
+
     let inputTokens = 0, outputTokens = 0;
 
     // Get actual tokens from API response only
-    const event = group.event;
     if (group.type === 'api_call_response') {
         // Response includes both actual input and output tokens from API
         inputTokens = event.data?.tokens?.input || event.metadata?.tokens?.input || 0;
@@ -874,14 +918,14 @@ function createGroupElement(group) {
     if (inputTokens > 0) {
         const inputBadge = document.createElement('span');
         inputBadge.className = 'token-badge input';
-        inputBadge.textContent = `↓${inputTokens}`;
+        inputBadge.textContent = `↓${inputTokens} T`;
         header.appendChild(inputBadge);
     }
 
     if (outputTokens > 0) {
         const outputBadge = document.createElement('span');
         outputBadge.className = 'token-badge output';
-        outputBadge.textContent = `↑${outputTokens}`;
+        outputBadge.textContent = `↑${outputTokens} T`;
         header.appendChild(outputBadge);
     }
 
@@ -907,22 +951,15 @@ function getGroupTitle(group) {
     const turnNum = group.turnNumber;
 
     if (group.type === 'api_call_request') {
-        const messageCount = event.data?.messageCount || 0;
+        // Show tool definitions count
         const toolCount = event.data?.toolCount || 0;
-        let title = `API Call Request - Turn ${turnNum}`;
-        if (messageCount > 0) {
-            title += ` (${messageCount} messages`;
-            if (toolCount > 0) title += `, ${toolCount} tools`;
-            title += ')';
+        if (toolCount > 0) {
+            return `${toolCount} tool definitions`;
         }
-        return title;
+        return '';
     } else if (group.type === 'api_call_response') {
-        const toolCallCount = event.data?.toolCallCount || 0;
-        let title = `API Call Response - Turn ${turnNum}`;
-        if (toolCallCount > 0) {
-            title += ` (${toolCallCount} tool calls)`;
-        }
-        return title;
+        // Will be replaced with tool name badges
+        return '';
     }
 
     // Fallback for old event types
@@ -1082,6 +1119,215 @@ function createEventElement(event) {
     eventDiv.appendChild(details);
 
     return eventDiv;
+}
+
+// ===================================
+// VIEW SWITCHING
+// ===================================
+
+function switchView(viewName) {
+    state.currentView = viewName;
+
+    // Update tab active states
+    document.querySelectorAll('.view-tab').forEach(tab => {
+        tab.classList.remove('active');
+    });
+    document.getElementById(`${viewName}Tab`).classList.add('active');
+
+    // Show/hide views
+    if (viewName === 'timeline') {
+        document.getElementById('timelineView').style.display = 'block';
+        document.getElementById('conversationView').style.display = 'none';
+    } else {
+        document.getElementById('timelineView').style.display = 'none';
+        document.getElementById('conversationView').style.display = 'block';
+    }
+}
+
+// ===================================
+// CONVERSATION VIEW
+// ===================================
+
+// Helper function to extract text content from various formats
+function extractTextContent(content) {
+    if (typeof content === 'string') {
+        return content;
+    } else if (Array.isArray(content)) {
+        return content
+            .filter(c => c.type === 'text')
+            .map(c => c.text)
+            .join('\n')
+            .trim();
+    }
+    return '';
+}
+
+function buildConversationData() {
+    const conversationLines = [];
+
+    // Get all events for current session from rawData (includes ALL event types)
+    const allEvents = state.rawData.filter(e => e.sessionId === state.currentSession);
+
+    // Sort chronologically
+    allEvents.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+
+    // Process each event type directly
+    allEvents.forEach(event => {
+        if (event.eventType === 'user_message') {
+            const text = extractTextContent(event.data?.content);
+            if (text) {
+                conversationLines.push({
+                    type: 'user',
+                    content: text
+                });
+            }
+        }
+        else if (event.eventType === 'assistant_message' || event.eventType === 'agent_turn') {
+            const text = extractTextContent(event.data?.content);
+            if (text) {
+                conversationLines.push({
+                    type: 'assistant',
+                    content: text
+                });
+            }
+        }
+        else if (event.eventType === 'tool_call') {
+            conversationLines.push({
+                type: 'tool-call',
+                toolCall: event.data
+            });
+        }
+        else if (event.eventType === 'tool_result') {
+            conversationLines.push({
+                type: 'tool-result',
+                toolCallId: event.data?.tool_call_id,
+                content: event.data?.content || event.data?.result
+            });
+        }
+    });
+
+    return conversationLines;
+}
+
+function renderConversationView(session) {
+    const container = document.getElementById('conversationList');
+    container.innerHTML = '';
+
+    const conversationLines = buildConversationData(session.events);
+
+    document.getElementById('conversationCount').textContent =
+        `${conversationLines.length} ${conversationLines.length === 1 ? 'line' : 'lines'}`;
+
+    conversationLines.forEach(line => container.appendChild(createConversationLine(line)));
+}
+
+function createConversationLine(line) {
+    const lineDiv = document.createElement('div');
+    lineDiv.className = `conversation-line ${line.type}`;
+
+    if (line.type === 'user') {
+        // Simple user message
+        const textDiv = document.createElement('div');
+        textDiv.className = 'message-text';
+        textDiv.textContent = line.content;
+        lineDiv.appendChild(textDiv);
+    } else if (line.type === 'assistant') {
+        // Simple assistant message
+        const textDiv = document.createElement('div');
+        textDiv.className = 'message-text';
+        textDiv.textContent = line.content;
+        lineDiv.appendChild(textDiv);
+    } else if (line.type === 'tool-call') {
+        // Collapsible tool call
+        const header = document.createElement('div');
+        header.className = 'line-header';
+
+        const expandIcon = document.createElement('span');
+        expandIcon.className = 'expand-icon';
+        expandIcon.textContent = '▶';
+        header.appendChild(expandIcon);
+
+        const label = document.createElement('span');
+        label.className = 'line-label';
+        label.textContent = 'Tool Call';
+        header.appendChild(label);
+
+        // Tool badge
+        const toolName = line.toolCall.toolName || line.toolCall.name || 'unknown';
+        const badge = document.createElement('span');
+        badge.className = 'tool-badge';
+        badge.setAttribute('data-tool', toolName);
+        badge.textContent = toolName;
+        header.appendChild(badge);
+
+        lineDiv.appendChild(header);
+
+        // Tool content (collapsed by default)
+        const content = document.createElement('div');
+        content.className = 'line-content';
+
+        try {
+            // Tool call events store arguments in 'input' or 'arguments' field
+            const rawArgs = line.toolCall.input || line.toolCall.arguments || line.toolCall.function?.arguments;
+            const args = typeof rawArgs === 'string'
+                ? JSON.parse(rawArgs)
+                : rawArgs || {};
+            content.textContent = JSON.stringify(args, null, 2);
+        } catch (error) {
+            content.textContent = line.toolCall.input || line.toolCall.arguments || 'No arguments';
+        }
+
+        lineDiv.appendChild(content);
+
+        // Click to expand/collapse
+        header.addEventListener('click', () => {
+            lineDiv.classList.toggle('expanded');
+        });
+    } else if (line.type === 'tool-result') {
+        // Collapsible tool result
+        const header = document.createElement('div');
+        header.className = 'line-header';
+
+        const expandIcon = document.createElement('span');
+        expandIcon.className = 'expand-icon';
+        expandIcon.textContent = '▶';
+        header.appendChild(expandIcon);
+
+        const label = document.createElement('span');
+        label.className = 'line-label';
+        label.textContent = 'Tool Result';
+        header.appendChild(label);
+
+        lineDiv.appendChild(header);
+
+        // Tool result content (collapsed by default)
+        const content = document.createElement('div');
+        content.className = 'line-content';
+
+        // Handle different content formats
+        let resultText = '';
+        if (typeof line.content === 'string') {
+            resultText = line.content;
+        } else if (Array.isArray(line.content)) {
+            // Extract text from content blocks
+            resultText = line.content
+                .filter(c => c.type === 'text')
+                .map(c => c.text)
+                .join('\n');
+        } else if (typeof line.content === 'object') {
+            resultText = JSON.stringify(line.content, null, 2);
+        }
+
+        content.textContent = resultText || 'No result';
+        lineDiv.appendChild(content);
+
+        // Click to expand/collapse
+        header.addEventListener('click', () => {
+            lineDiv.classList.toggle('expanded');
+        });
+    }
+
+    return lineDiv;
 }
 
 // ===================================
