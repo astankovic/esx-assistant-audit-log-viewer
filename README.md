@@ -2,7 +2,7 @@
 
 Web-based visualizer for ESX Assistant audit logs with token tracking, pricing, and analytics.
 
-## Live Demo
+## Access The App
 🔗 **https://astankovic.github.io/esx-assistant-audit-log-viewer/**
 
 ## Features
